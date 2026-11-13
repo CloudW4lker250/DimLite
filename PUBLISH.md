@@ -1,6 +1,6 @@
 # Publishing DimLite
 
-The repository is already initialized on branch `main` with the release commit. The GitHub connection can inspect repositories, but creating a new repository is not available from the local command line in this environment.
+The repository is already initialized on branch `main` with the release commit and the `v1.0.0` tag.
 
 ## One-time GitHub step
 
