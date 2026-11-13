@@ -25,7 +25,7 @@ try {
         & rc.exe /nologo /c65001 "/fo$buildDir\DimLite.res" DimLite.rc
         if ($LASTEXITCODE -ne 0) { throw 'Resource compilation failed.' }
         $destination = Join-Path (Split-Path -Parent $PSScriptRoot) 'DimLite.exe'
-        & cl.exe /nologo /O1 /MT /GL /Gy /Gw /W4 /WX /EHsc /std:c++17 /utf-8 /guard:cf /D_WIN32_WINNT=0x0A00 /DUNICODE /D_UNICODE "/Fo$buildDir\DimLite.obj" "/Fe$destination" DimLite.cpp "$buildDir\DimLite.res" user32.lib gdi32.lib shell32.lib comctl32.lib advapi32.lib ole32.lib dwmapi.lib gdiplus.lib Magnification.lib delayimp.lib /link /LTCG /OPT:REF /OPT:ICF /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /DELAYLOAD:Magnification.dll /DELAYLOAD:gdiplus.dll /SUBSYSTEM:WINDOWS,10.00 /MANIFEST:EMBED /MANIFESTINPUT:DimLite.manifest
+        & cl.exe /nologo /O1 /MT /GL /Gy /Gw /W4 /WX /EHsc /std:c++17 /utf-8 /guard:cf /D_WIN32_WINNT=0x0A00 /DUNICODE /D_UNICODE "/Fo$buildDir\DimLite.obj" "/Fe$destination" DimLite.cpp "$buildDir\DimLite.res" user32.lib gdi32.lib shell32.lib comctl32.lib advapi32.lib ole32.lib dwmapi.lib gdiplus.lib Magnification.lib winhttp.lib bcrypt.lib delayimp.lib /link /LTCG /OPT:REF /OPT:ICF /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /DELAYLOAD:Magnification.dll /DELAYLOAD:gdiplus.dll /SUBSYSTEM:WINDOWS,10.00 /MANIFEST:EMBED /MANIFESTINPUT:DimLite.manifest
         if ($LASTEXITCODE -ne 0) { throw 'C++ compilation failed.' }
         Write-Output "Built: $destination"
     } finally { Pop-Location }

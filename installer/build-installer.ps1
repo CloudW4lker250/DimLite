@@ -12,10 +12,10 @@ $exe = Join-Path $repo 'DimLite.exe'
 if (!(Test-Path -LiteralPath $exe)) { & (Join-Path $repo 'source\build.ps1') }
 & $iscc (Join-Path $PSScriptRoot 'DimLite.iss')
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE." }
-$setup = Join-Path $repo 'release\DimLite-1.0.0-Setup.exe'
+$setup = Join-Path $repo 'release\DimLite-1.1.0-Setup.exe'
 if (!(Test-Path -LiteralPath $setup)) { throw 'Setup executable was not created.' }
 $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash
-Set-Content -LiteralPath (Join-Path $repo 'release\DimLite-1.0.0-Setup.sha256') -Value ($hash + '  DimLite-1.0.0-Setup.exe') -Encoding ascii
+Set-Content -LiteralPath (Join-Path $repo 'release\DimLite-1.1.0-Setup.sha256') -Value ($hash + '  DimLite-1.1.0-Setup.exe') -Encoding ascii
 Write-Output "Created: $setup"
 Write-Output "SHA-256: $hash"
 

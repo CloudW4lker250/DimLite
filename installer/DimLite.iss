@@ -1,5 +1,5 @@
 #define MyAppName "DimLite"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "CloudW4lker250"
 #define MyAppURL "https://github.com/CloudW4lker250/DimLite"
 #define MyAppExeName "DimLite.exe"
@@ -23,7 +23,7 @@ SetupIconFile=..\source\DimLite.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 LicenseFile=..\LICENSE
 OutputDir=..\release
-OutputBaseFilename=DimLite-1.0.0-Setup
+OutputBaseFilename=DimLite-1.1.0-Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

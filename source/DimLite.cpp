@@ -1,4 +1,4 @@
-// DimLite 1.0 - native, event-driven desktop dimming with no network access.
+// DimLite 1.1 - native, event-driven desktop dimming with opt-in update checks.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -9,6 +9,8 @@
 #include <strsafe.h>
 #include <magnification.h>
 #include <dwmapi.h>
+#include <winhttp.h>
+#include <bcrypt.h>
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -20,7 +22,7 @@
 constexpr wchar_t MainClass[] = L"DimLite.Controller.1";
 constexpr wchar_t FlyoutClass[] = L"DimLite.Flyout.1";
 constexpr wchar_t MenuClass[] = L"DimLite.Menu.1";
-constexpr wchar_t VersionText[] = L"DimLite 1.0.0";
+constexpr wchar_t VersionText[] = L"DimLite 1.1.0";
 constexpr wchar_t RunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr UINT TrayMessage = WM_APP + 1, SetLevelMessage = WM_APP + 2;
 constexpr UINT ShowMessage = WM_APP + 3, HideMessage = WM_APP + 4, QuitMessage = WM_APP + 5;
@@ -30,12 +32,14 @@ constexpr UINT TrayWheelMessage = WM_APP + 10, RefreshTrayBoundsMessage = WM_APP
 constexpr UINT ResetOnlyMessage = WM_APP + 12, IconModeMessage = WM_APP + 13;
 constexpr UINT LockMessage = WM_APP + 14, ProfilesMessage = WM_APP + 15, ForegroundAppMessage = WM_APP + 16;
 constexpr UINT EmergencyResetMessage = WM_APP + 17;
+constexpr UINT UpdateResultMessage = WM_APP + 18;
 constexpr ULONG_PTR StatusSignature = 0x44494D31;
 constexpr int SliderId = 101, StartupId = 102, ExitId = 104;
 constexpr int NightId = 120, EveningId = 121, ResetId = 122, OpenId = 123, ThemeId = 130;
 constexpr int AutoThemeId = 131, PercentageIconId = 132;
 constexpr int LockId = 133, ProfilesId = 134, AppProfileId = 135;
 constexpr int SettingsId = 136, BackId = 137, LightThemeId = 138, DarkThemeId = 139, VersionId = 140;
+constexpr int AutoUpdateId = 141, CheckUpdatesId = 142;
 constexpr UINT_PTR SaveTimer = 1, DisplayTimer = 2, FlyoutLeaveTimer = 3, FinishTrayTimer = 4;
 constexpr UINT_PTR TransitionTimer = 5, TrayUpdateTimer = 6;
 
@@ -45,6 +49,7 @@ HINSTANCE instance;
 HWND mainWindow, slider, valueLabel, shortcutLabel, startupBox;
 HWND flyout, flyoutSlider, flyoutVerticalSlider, flyoutValue, tooltips, menuPanel;
 HWND settingsHeading;
+HWND updateButton = nullptr;
 bool settingsVisible = false;
 HICON appIcon, trayIcon, windowIcon, taskbarIcon;
 HBRUSH backgroundBrush;
@@ -61,6 +66,8 @@ std::wstring activeAppPath, activeAppName;
 bool systemTrayDark = false, trayUpdatePending = false;
 ULONGLONG lastTrayUpdate = 0;
 bool darkMode = false, saving = false, magInitialized = false, originalCaptured = false, hotkeyRegistered = false, mainPresented = false;
+bool autoUpdate = false, updateInProgress = false;
+HANDLE updateThread = nullptr;
 bool trayMinimizeRequested = false;
 enum class ThemeMode { Automatic = 0, Light = 1, Dark = 2 };
 ThemeMode themeMode = ThemeMode::Automatic;
@@ -88,7 +95,7 @@ HANDLE recoveryMapping, recoveryStop, guardProcess;
 RecoveryState* recoveryState;
 ULONG_PTR graphicsToken;
 constexpr int PanelWidth = 380, PanelHeight = 206, FlyoutWidth = 340, FlyoutHeight = 168;
-constexpr int SettingsHeight = 426;
+constexpr int SettingsHeight = 486;
 constexpr int StripWidth = 64, StripHeight = 220;
 bool activeStrip = false;
 bool lastFadeAnimated = false;
@@ -109,6 +116,8 @@ void ResetBrightness();
 void SetProfilesEnabled(bool enabled);
 void TrackForegroundApp(HWND window, bool apply = true);
 void SyncSettings();
+void StartUpdateCheck(bool automatic = false);
+void FinishUpdateThread();
 constexpr int MenuWidth = 196, MenuHeight = 156;
 UINT menuDpi = 96;
 int menuPixelWidth = MenuWidth;
@@ -137,6 +146,219 @@ bool SystemAppsDark() {
     RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
         L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &bytes);
     return light == 0;
+}
+
+struct UpdateResult {
+    bool automatic = false, downloadPhase = false, success = false, available = false;
+    std::wstring version, installerUrl, digest, downloadedPath, error;
+};
+
+struct UpdateRequest {
+    bool automatic = false;
+    std::wstring version, installerUrl, digest;
+};
+
+std::wstring Utf8ToWide(const std::string& text) {
+    if (text.empty()) return {};
+    const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (length <= 0) return {};
+    std::wstring result(static_cast<size_t>(length), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), result.data(), length);
+    return result;
+}
+
+std::string JsonString(const std::string& json, const char* key, size_t from = 0) {
+    const std::string needle = std::string("\"") + key + "\"";
+    const size_t keyPosition = json.find(needle, from);
+    if (keyPosition == std::string::npos) return {};
+    const size_t colon = json.find(':', keyPosition + needle.size());
+    if (colon == std::string::npos) return {};
+    size_t position = colon + 1;
+    while (position < json.size() && (json[position] == ' ' || json[position] == '\r' || json[position] == '\n' || json[position] == '\t')) ++position;
+    if (position >= json.size() || json[position] != '"') return {};
+    ++position;
+    std::string result;
+    while (position < json.size()) {
+        const char character = json[position++];
+        if (character == '"') break;
+        if (character == '\\' && position < json.size()) {
+            const char escaped = json[position++];
+            result.push_back(escaped == 'n' ? '\n' : escaped == 'r' ? '\r' : escaped == 't' ? '\t' : escaped);
+        } else result.push_back(character);
+    }
+    return result;
+}
+
+bool ParseVersion(const std::wstring& input, int& major, int& minor, int& patch) {
+    std::wstring version = input;
+    if (!version.empty() && (version[0] == L'v' || version[0] == L'V')) version.erase(version.begin());
+    major = minor = patch = 0;
+    return swscanf_s(version.c_str(), L"%d.%d.%d", &major, &minor, &patch) == 3;
+}
+
+bool NewerVersion(const std::wstring& candidate) {
+    int candidateMajor = 0, candidateMinor = 0, candidatePatch = 0;
+    int currentMajor = 0, currentMinor = 0, currentPatch = 0;
+    if (!ParseVersion(candidate, candidateMajor, candidateMinor, candidatePatch) ||
+        !ParseVersion(std::wstring(VersionText).substr(8), currentMajor, currentMinor, currentPatch)) return false;
+    if (candidateMajor != currentMajor) return candidateMajor > currentMajor;
+    if (candidateMinor != currentMinor) return candidateMinor > currentMinor;
+    return candidatePatch > currentPatch;
+}
+
+bool HttpGet(const wchar_t* host, INTERNET_PORT port, const std::wstring& path, std::string& body, std::wstring& error) {
+    HINTERNET session = WinHttpOpen(L"DimLite/1.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, nullptr, nullptr, 0);
+    if (!session) { error = L"Не удалось открыть сетевое соединение."; return false; }
+    WinHttpSetTimeouts(session, 5000, 5000, 5000, 5000);
+    HINTERNET connection = WinHttpConnect(session, host, port, 0);
+    HINTERNET request = connection ? WinHttpOpenRequest(connection, L"GET", path.c_str(), nullptr,
+        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE) : nullptr;
+    const wchar_t headers[] = L"Accept: application/vnd.github+json\r\nUser-Agent: DimLite/1.1\r\nX-GitHub-Api-Version: 2022-11-28\r\n";
+    const bool sent = request && WinHttpAddRequestHeaders(request, headers, static_cast<DWORD>(-1), WINHTTP_ADDREQ_FLAG_ADD) &&
+        WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+        WinHttpReceiveResponse(request, nullptr);
+    if (!sent) {
+        error = L"Не удалось получить информацию об обновлении.";
+        if (request) WinHttpCloseHandle(request); if (connection) WinHttpCloseHandle(connection); WinHttpCloseHandle(session); return false;
+    }
+    DWORD status = 0, statusSize = sizeof(status);
+    WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+        &status, &statusSize, WINHTTP_NO_HEADER_INDEX);
+    if (status < 200 || status >= 300) {
+        error = status == 403 ? L"GitHub временно ограничил частоту проверки." : L"GitHub не вернул данные об обновлении.";
+        WinHttpCloseHandle(request); WinHttpCloseHandle(connection); WinHttpCloseHandle(session); return false;
+    }
+    for (;;) {
+        DWORD available = 0;
+        if (!WinHttpQueryDataAvailable(request, &available) || available == 0) break;
+        std::vector<char> chunk(available);
+        DWORD read = 0;
+        if (!WinHttpReadData(request, chunk.data(), available, &read) || read == 0) break;
+        body.append(chunk.data(), read);
+        if (body.size() > 512 * 1024) { error = L"Ответ GitHub слишком большой."; body.clear(); break; }
+    }
+    WinHttpCloseHandle(request); WinHttpCloseHandle(connection); WinHttpCloseHandle(session);
+    if (body.empty()) { error = L"Пустой ответ GitHub."; return false; }
+    return true;
+}
+
+bool DownloadUrl(const std::wstring& url, const std::wstring& target, std::wstring& error) {
+    URL_COMPONENTS parts = {sizeof(parts)};
+    wchar_t hostBuffer[256] = {}, pathBuffer[32768] = {}, extraBuffer[4096] = {};
+    parts.lpszHostName = hostBuffer; parts.dwHostNameLength = ARRAYSIZE(hostBuffer);
+    parts.lpszUrlPath = pathBuffer; parts.dwUrlPathLength = ARRAYSIZE(pathBuffer);
+    parts.lpszExtraInfo = extraBuffer; parts.dwExtraInfoLength = ARRAYSIZE(extraBuffer);
+    if (!WinHttpCrackUrl(url.c_str(), 0, 0, &parts) || parts.nScheme != INTERNET_SCHEME_HTTPS) { error = L"Ссылка обновления небезопасна."; return false; }
+    std::wstring resource(pathBuffer, parts.dwUrlPathLength);
+    resource.append(extraBuffer, parts.dwExtraInfoLength);
+    HINTERNET session = WinHttpOpen(L"DimLite/1.1", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, nullptr, nullptr, 0);
+    HINTERNET connection = session ? WinHttpConnect(session, hostBuffer, parts.nPort, 0) : nullptr;
+    HINTERNET request = connection ? WinHttpOpenRequest(connection, L"GET", resource.c_str(), nullptr,
+        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE) : nullptr;
+    const wchar_t headers[] = L"User-Agent: DimLite/1.1\r\n";
+    const bool sent = request && WinHttpAddRequestHeaders(request, headers, static_cast<DWORD>(-1), WINHTTP_ADDREQ_FLAG_ADD) &&
+        WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(request, nullptr);
+    if (!sent) { error = L"Не удалось скачать установщик."; if (request) WinHttpCloseHandle(request); if (connection) WinHttpCloseHandle(connection); if (session) WinHttpCloseHandle(session); return false; }
+    HANDLE file = CreateFileW(target.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    if (file == INVALID_HANDLE_VALUE) { error = L"Не удалось создать временный файл."; WinHttpCloseHandle(request); WinHttpCloseHandle(connection); WinHttpCloseHandle(session); return false; }
+    bool ok = true;
+    for (;;) {
+        DWORD available = 0; if (!WinHttpQueryDataAvailable(request, &available) || available == 0) break;
+        std::vector<BYTE> chunk(available); DWORD read = 0, written = 0;
+        if (!WinHttpReadData(request, chunk.data(), available, &read) || read == 0 || !WriteFile(file, chunk.data(), read, &written, nullptr) || written != read) { ok = false; break; }
+    }
+    CloseHandle(file); WinHttpCloseHandle(request); WinHttpCloseHandle(connection); WinHttpCloseHandle(session);
+    if (!ok) { DeleteFileW(target.c_str()); error = L"Загрузка установщика прервана."; }
+    return ok;
+}
+
+bool Sha256File(const std::wstring& path, std::wstring& digest) {
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    BCRYPT_ALG_HANDLE algorithm = nullptr; BCRYPT_HASH_HANDLE hash = nullptr; bool ok = false;
+    DWORD objectLength = 0, resultLength = 0, hashLength = 0;
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0 &&
+        BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&objectLength), sizeof(objectLength), &resultLength, 0) == 0 &&
+        BCryptGetProperty(algorithm, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hashLength), sizeof(hashLength), &resultLength, 0) == 0) {
+        std::vector<BYTE> object(objectLength), output(hashLength);
+        if (BCryptCreateHash(algorithm, &hash, object.data(), objectLength, nullptr, 0, 0) == 0) {
+            std::vector<BYTE> buffer(64 * 1024); DWORD read = 0;
+            ok = true;
+            while (ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read) {
+                if (BCryptHashData(hash, buffer.data(), read, 0) != 0) { ok = false; break; }
+            }
+            ok = ok && BCryptFinishHash(hash, output.data(), hashLength, 0) == 0;
+            if (ok) {
+                wchar_t value[3]; digest.clear();
+                for (BYTE byte : output) { StringCchPrintfW(value, ARRAYSIZE(value), L"%02x", byte); digest.append(value); }
+            }
+        }
+    }
+    if (hash) BCryptDestroyHash(hash); if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0); CloseHandle(file); return ok;
+}
+
+bool CheckLatestRelease(UpdateResult& result) {
+    std::string json; if (!HttpGet(L"api.github.com", INTERNET_DEFAULT_HTTPS_PORT, L"/repos/CloudW4lker250/DimLite/releases/latest", json, result.error)) return false;
+    const std::wstring tag = Utf8ToWide(JsonString(json, "tag_name"));
+    result.version = tag;
+    if (tag.empty()) { result.error = L"GitHub не сообщил номер версии."; return false; }
+    result.success = true; result.available = NewerVersion(tag);
+    if (!result.available) return true;
+    size_t position = 0;
+    while ((position = json.find("\"name\"", position)) != std::string::npos) {
+        const std::string name = JsonString(json, "name", position);
+        if (name.find("Setup.exe") != std::string::npos) {
+            const std::string url = JsonString(json, "browser_download_url", position);
+            const std::string digest = JsonString(json, "digest", position);
+            result.installerUrl = Utf8ToWide(url); result.digest = Utf8ToWide(digest); break;
+        }
+        position += 6;
+    }
+    if (result.installerUrl.empty()) { result.success = false; result.error = L"В релизе нет установщика Windows."; return false; }
+    return true;
+}
+
+DWORD WINAPI UpdateCheckThread(void* parameter) {
+    auto* request = static_cast<UpdateRequest*>(parameter); auto* result = new UpdateResult(); result->automatic = request->automatic;
+    CheckLatestRelease(*result); delete request;
+    if (mainWindow) PostMessageW(mainWindow, UpdateResultMessage, 0, reinterpret_cast<LPARAM>(result)); else delete result;
+    return 0;
+}
+
+DWORD WINAPI UpdateDownloadThread(void* parameter) {
+    auto* request = static_cast<UpdateRequest*>(parameter); auto* result = new UpdateResult(); result->automatic = request->automatic; result->downloadPhase = true;
+    wchar_t temporary[MAX_PATH] = {}; GetTempPathW(ARRAYSIZE(temporary), temporary);
+    result->downloadedPath = std::wstring(temporary) + L"DimLite-Setup-" + request->version + L".exe";
+    result->success = DownloadUrl(request->installerUrl, result->downloadedPath, result->error);
+    if (result->success && !request->digest.empty()) {
+        const size_t separator = request->digest.find(L':'); const std::wstring expected = separator == std::wstring::npos ? request->digest : request->digest.substr(separator + 1);
+        std::wstring actual; result->success = Sha256File(result->downloadedPath, actual) && _wcsicmp(actual.c_str(), expected.c_str()) == 0;
+        if (!result->success) { DeleteFileW(result->downloadedPath.c_str()); result->error = L"Проверка целостности установщика не прошла."; }
+    }
+    delete request; if (mainWindow) PostMessageW(mainWindow, UpdateResultMessage, 0, reinterpret_cast<LPARAM>(result)); else delete result; return 0;
+}
+
+void FinishUpdateThread() { if (updateThread) { CloseHandle(updateThread); updateThread = nullptr; } }
+
+void StartUpdateDownload(const UpdateResult& source) {
+    auto* request = new UpdateRequest(); request->automatic = source.automatic; request->version = source.version; request->installerUrl = source.installerUrl; request->digest = source.digest;
+    updateInProgress = true; if (updateButton) SetWindowTextW(updateButton, L"Скачивание...");
+    updateThread = CreateThread(nullptr, 0, UpdateDownloadThread, request, 0, nullptr);
+    if (!updateThread) { delete request; updateInProgress = false; if (updateButton) SetWindowTextW(updateButton, L"Проверить обновления"); MessageBoxW(mainWindow, L"Не удалось запустить загрузку обновления.", L"DimLite", MB_OK | MB_ICONWARNING); }
+}
+
+void StartUpdateCheck(bool automatic) {
+    if (updateInProgress || !mainWindow) return;
+    auto* request = new UpdateRequest(); request->automatic = automatic; updateInProgress = true;
+    if (updateButton) SetWindowTextW(updateButton, L"Проверяем...");
+    updateThread = CreateThread(nullptr, 0, UpdateCheckThread, request, 0, nullptr);
+    if (!updateThread) { delete request; updateInProgress = false; if (updateButton) SetWindowTextW(updateButton, L"Проверить обновления"); if (!automatic) MessageBoxW(mainWindow, L"Не удалось запустить проверку обновлений.", L"DimLite", MB_OK | MB_ICONWARNING); }
+}
+
+bool LaunchUpdateInstaller(const std::wstring& path) {
+    const HINSTANCE launched = ShellExecuteW(nullptr, L"open", path.c_str(),
+        L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-", nullptr, SW_SHOWNORMAL);
+    return reinterpret_cast<INT_PTR>(launched) > 32;
 }
 
 HICON MakePercentageIcon(bool onDark) {
@@ -321,6 +543,7 @@ void SaveSettings() {
     ok &= save(L"Appearance", L"PercentageIcon", percentageIcon ? 1 : 0);
     ok &= save(L"Behavior", L"Locked", brightnessLocked ? 1 : 0);
     ok &= save(L"Behavior", L"Profiles", profilesEnabled ? 1 : 0);
+    ok &= save(L"Behavior", L"AutoUpdate", autoUpdate ? 1 : 0);
     if (ok) saving = false;
 }
 
@@ -967,12 +1190,17 @@ void DrawCheckbox(HWND window, HDC dc) {
         const bool checked = SendMessageW(window, BM_GETCHECK, 0, 0) == BST_CHECKED;
         FilledRoundRect(dc, box, checked ? Accent() : Background(), checked ? Accent() : Foreground(), MulDiv(4, atDpi, 96));
         if (checked) {
-            HPEN pen = CreatePen(PS_SOLID, std::max(1, MulDiv(2, atDpi, 96)), Background());
-            HGDIOBJ old = SelectObject(dc, pen);
-            MoveToEx(dc, box.left + side / 5, top + side / 2, nullptr);
-            LineTo(dc, box.left + side * 2 / 5, top + side * 3 / 4);
-            LineTo(dc, box.left + side * 4 / 5, top + side / 4);
-            SelectObject(dc, old); DeleteObject(pen);
+            Gdiplus::Graphics graphics(dc);
+            graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+            Gdiplus::Pen pen(Color(Background()), std::max(1.5f, 1.8f * static_cast<float>(atDpi) / 96.0f));
+            pen.SetStartCap(Gdiplus::LineCapRound); pen.SetEndCap(Gdiplus::LineCapRound);
+            const float left = static_cast<float>(box.left) + side * 0.21f;
+            const float middle = static_cast<float>(box.left) + side * 0.43f;
+            const float right = static_cast<float>(box.left) + side * 0.79f;
+            const float center = static_cast<float>(top) + side * 0.50f;
+            graphics.DrawLine(&pen, left, center, middle, static_cast<float>(top) + side * 0.72f);
+            graphics.DrawLine(&pen, middle, static_cast<float>(top) + side * 0.72f, right,
+                static_cast<float>(top) + side * 0.27f);
         }
         wchar_t text[128]; GetWindowTextW(window, text, ARRAYSIZE(text));
         rect.left = side + MulDiv(9, atDpi, 96);
@@ -1091,6 +1319,7 @@ void SyncSettings() {
         else if (id == LockId) check = brightnessLocked;
         else if (id == ProfilesId) check = profilesEnabled;
         else if (id == AppProfileId) check = DimProfiles::Find(activeAppPath) >= 0;
+        else if (id == AutoUpdateId) check = autoUpdate;
         else continue;
         SendMessageW(c.window, BM_SETCHECK, check ? BST_CHECKED : BST_UNCHECKED, 0);
         InvalidateRect(c.window, nullptr, FALSE);
@@ -1100,6 +1329,8 @@ void SyncSettings() {
     const std::wstring caption = name.empty() ? L"Запоминать для приложения" : L"Запоминать: " + name;
     SetWindowTextW(GetDlgItem(mainWindow, AppProfileId), caption.c_str());
     EnableWindow(GetDlgItem(mainWindow, AppProfileId), !activeAppPath.empty() && profilesEnabled);
+    EnableWindow(GetDlgItem(mainWindow, AutoUpdateId), true);
+    if (updateButton) EnableWindow(updateButton, !updateInProgress);
     for (int id : {AutoThemeId, LightThemeId, DarkThemeId})
         InvalidateRect(GetDlgItem(mainWindow, id), nullptr, FALSE);
 }
@@ -1198,7 +1429,7 @@ void DrawPanel(HWND window, bool compact, HDC dc) {
     RECT rect; GetClientRect(window, &rect); FillRect(dc, &rect, backgroundBrush);
     if (compact && activeStrip) return;
     const int margin = compact ? FlyScale(20) : Scale(24);
-    const int y = compact ? FlyScale(111) : Scale(settingsVisible ? 342 : 130);
+    const int y = compact ? FlyScale(111) : Scale(settingsVisible ? 412 : 130);
     HPEN pen = CreatePen(PS_SOLID, 1, Divider());
     HGDIOBJ old = SelectObject(dc, pen);
     MoveToEx(dc, margin, y, nullptr); LineTo(dc, rect.right - margin, y);
@@ -1284,6 +1515,11 @@ void HandleCommand(int command) {
             saving = true; SetTimer(mainWindow, SaveTimer, 400, nullptr);
         }
         break;
+    case AutoUpdateId:
+        autoUpdate = !autoUpdate; saving = true; SetTimer(mainWindow, SaveTimer, 400, nullptr);
+        if (autoUpdate) StartUpdateCheck(true);
+        break;
+    case CheckUpdatesId: StartUpdateCheck(false); break;
     case StartupId:
         if (!SetStartup(!StartupEnabled())) MessageBoxW(mainWindow,
             L"Не удалось изменить автозапуск.", L"DimLite", MB_OK | MB_ICONINFORMATION);
@@ -1479,7 +1715,8 @@ bool WriteLiveStatus(const wchar_t* path) {
         "  \"brightness_locked\": %s,\n  \"sliders_enabled\": %s,\n  \"base_brightness\": %d,\n"
         "  \"profiles_enabled\": %s,\n  \"profile_count\": %zu,\n  \"active_profile\": %s,\n  \"foreground_hook_running\": %s,\n"
         "  \"hud_visible\": %s,\n  \"hud_alpha\": %u,\n  \"hud_rendered\": %s,\n  \"hud_has_focus\": %s,\n"
-        "  \"version\": \"1.0.0\",\n  \"settings_page\": %s,\n  \"tray_menu_items\": %zu,\n"
+        "  \"version\": \"1.1.0\",\n  \"auto_update\": %s,\n  \"update_in_progress\": %s,\n"
+        "  \"settings_page\": %s,\n  \"tray_menu_items\": %zu,\n"
         "  \"hud_interactive\": %s,\n  \"hud_dragging\": %s,\n  \"hud_hide_timer\": %s,\n  \"hud_fading\": %s,\n  \"hud_level\": %d\n}\n",
         brightness, matches ? "true" : "false", IsWindowVisible(mainWindow) ? "true" : "false",
         IsWindowVisible(flyout) ? "true" : "false", static_cast<int>(SendMessageW(slider, TBM_GETPOS, 0, 0)),
@@ -1502,6 +1739,7 @@ bool WriteLiveStatus(const wchar_t* path) {
         DimProfiles::Find(activeAppPath) >= 0 ? "true" : "false", foregroundHook ? "true" : "false",
         BrightnessHud::window && IsWindowVisible(BrightnessHud::window) ? "true" : "false", static_cast<UINT>(BrightnessHud::alpha),
         BrightnessHud::rendered ? "true" : "false", BrightnessHud::window && GetForegroundWindow() == BrightnessHud::window ? "true" : "false",
+        autoUpdate ? "true" : "false", updateInProgress ? "true" : "false",
         settingsVisible ? "true" : "false", menuControls.size(),
         BrightnessHud::window && !(GetWindowLongPtrW(BrightnessHud::window,GWL_EXSTYLE) & WS_EX_TRANSPARENT) ? "true" : "false",
         BrightnessHud::dragging ? "true" : "false", BrightnessHud::hideTimerActive ? "true" : "false", BrightnessHud::fading ? "true" : "false", BrightnessHud::currentLevel);
@@ -1598,8 +1836,10 @@ LRESULT CALLBACK MainProc(HWND window, UINT message, WPARAM w, LPARAM l) {
         AddSetting(L"BUTTON", L"Профили приложений", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 224, 332, 28, ProfilesId);
         AddSetting(L"BUTTON", L"Запоминать для приложения", WS_TABSTOP | BS_AUTOCHECKBOX, 44, 258, 312, 28, AppProfileId);
         startupBox = AddSetting(L"BUTTON", L"Запускать с Windows", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 298, 332, 28, StartupId);
-        AddSetting(L"STATIC", VersionText, 0, 24, 358, 332, 22, VersionId);
-        shortcutLabel = AddSetting(L"STATIC", L"Снять затемнение: Ctrl+Alt+F12", 0, 24, 390, 332, 20);
+        AddSetting(L"BUTTON", L"Автоматически обновлять", WS_TABSTOP | BS_AUTOCHECKBOX, 24, 334, 332, 28, AutoUpdateId);
+        updateButton = AddSetting(L"BUTTON", L"Проверить обновления", WS_TABSTOP | BS_OWNERDRAW, 24, 370, 332, 32, CheckUpdatesId);
+        AddSetting(L"STATIC", VersionText, 0, 24, 420, 332, 22, VersionId);
+        shortcutLabel = AddSetting(L"STATIC", L"Снять затемнение: Ctrl+Alt+F12", 0, 24, 452, 332, 20);
         ApplyFonts(); return 0;
     case WM_PAINT: PaintPanel(window, false); return 0;
     case WM_PRINTCLIENT: DrawPanel(window, false, reinterpret_cast<HDC>(w)); return 0;
@@ -1628,6 +1868,29 @@ LRESULT CALLBACK MainProc(HWND window, UINT message, WPARAM w, LPARAM l) {
             ShowWindow(window, SW_HIDE); trayMinimizeRequested = false;
         }
         return 0;
+    case UpdateResultMessage: {
+        auto* update = reinterpret_cast<UpdateResult*>(l);
+        FinishUpdateThread(); updateInProgress = false;
+        if (updateButton) {
+            SetWindowTextW(updateButton, L"Проверить обновления");
+            EnableWindow(updateButton, TRUE);
+        }
+        if (!update->success) {
+            if (!update->automatic) MessageBoxW(window, update->error.empty() ? L"Не удалось проверить обновления." : update->error.c_str(), L"DimLite", MB_OK | MB_ICONWARNING);
+        } else if (update->downloadPhase) {
+            if (!LaunchUpdateInstaller(update->downloadedPath)) {
+                MessageBoxW(window, L"Не удалось запустить установщик обновления.", L"DimLite", MB_OK | MB_ICONWARNING);
+            } else DestroyWindow(window);
+        } else if (!update->available) {
+            if (!update->automatic) MessageBoxW(window, L"Установлена последняя версия DimLite.", L"Обновления", MB_OK | MB_ICONINFORMATION);
+        } else if (update->automatic) {
+            StartUpdateDownload(*update);
+        } else {
+            wchar_t messageText[256]; StringCchPrintfW(messageText, ARRAYSIZE(messageText), L"Доступна версия %s. Скачать и установить её сейчас?", update->version.c_str());
+            if (MessageBoxW(window, messageText, L"Доступно обновление", MB_YESNO | MB_ICONINFORMATION) == IDYES) StartUpdateDownload(*update);
+        }
+        delete update; return 0;
+    }
     case WM_DISPLAYCHANGE: SetTimer(window, DisplayTimer, 250, nullptr); return 0;
     case WM_SETTINGCHANGE:
     case WM_THEMECHANGED:
@@ -1727,6 +1990,7 @@ LRESULT CALLBACK MainProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     }
     case WM_DESTROY: {
         SaveSettings();
+        if (updateThread) { WaitForSingleObject(updateThread, 1200); FinishUpdateThread(); }
         if (foregroundHook) { UnhookWinEvent(foregroundHook); foregroundHook = nullptr; }
         BrightnessHud::Destroy();
         StopTrayMouse();
@@ -1851,6 +2115,7 @@ int WINAPI wWinMain(HINSTANCE app, HINSTANCE, PWSTR, int) {
     manualBrightness = base >= 5 && base <= 100 ? static_cast<int>(base) : 100;
     brightnessLocked = requestedLock >= 0 ? requestedLock != 0 : GetPrivateProfileIntW(L"Behavior", L"Locked", 0, settingsPath.c_str()) != 0;
     profilesEnabled = requestedProfiles >= 0 ? requestedProfiles != 0 : GetPrivateProfileIntW(L"Behavior", L"Profiles", 1, settingsPath.c_str()) != 0;
+    autoUpdate = GetPrivateProfileIntW(L"Behavior", L"AutoUpdate", 0, settingsPath.c_str()) != 0;
     TrackForegroundApp(GetForegroundWindow(), false);
     if (!brightnessLocked) brightness = profilesEnabled ? DimProfiles::Resolve(activeAppPath, manualBrightness) : manualBrightness;
     if (requested >= 0 && (!brightnessLocked || reset)) { brightness = requested; RememberLevel(brightness); }
@@ -1920,6 +2185,7 @@ int WINAPI wWinMain(HINSTANCE app, HINSTANCE, PWSTR, int) {
     foregroundHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
         ForegroundChanged, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     RefreshTrayBounds(); StartTrayMouse();
+    if (autoUpdate) StartUpdateCheck(true);
     if (hasWheel) ApplyWheelDelta(requestedWheel);
     if (showMenu) PostMessageW(mainWindow, MenuMessage, 0, 0);
     else if (showFlyout) OpenFlyout();

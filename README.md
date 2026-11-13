@@ -4,7 +4,7 @@
 
 Lightweight native screen dimmer for Windows 10/11. DimLite applies a software color transform to the whole desktop, so it can dim the taskbar and windows below the monitor's hardware brightness minimum.
 
-The project is written in C++/Win32. It has no Electron, .NET runtime, network access or telemetry.
+The project is written in C++/Win32. It has no Electron, .NET runtime or telemetry. Network access is used only when update checking is enabled or started manually.
 
 ## Download
 
@@ -26,6 +26,7 @@ The application starts in the notification area. A shortcut can be placed in Sta
 - High-contrast percentage or monochrome tray icon.
 - Startup with Windows, centered first launch and tray minimization.
 - Recovery helper restores the original desktop transform after an unexpected exit.
+- Optional manual or automatic update checking from GitHub Releases.
 
 ## Quick controls
 
@@ -69,7 +70,8 @@ DimLite is released under the [MIT License](LICENSE).
 
 Лёгкое нативное приложение для затемнения экрана в Windows 10/11. DimLite применяет программное цветовое преобразование всего рабочего стола, поэтому может затемнять окна и панель задач ниже аппаратного минимума монитора.
 
-Проект написан на C++/Win32. В нём нет Electron, .NET, сетевых запросов и телеметрии.
+Проект написан на C++/Win32. В нём нет Electron, .NET и телеметрии.
+По умолчанию сетевых запросов нет: доступ к сети используется только при ручной проверке обновлений или при включённой автоматической проверке.
 
 ### Возможности
 
@@ -80,6 +82,7 @@ DimLite is released under the [MIT License](LICENSE).
 - Профили приложений, блокировка яркости и три режима темы.
 - Настройки, автозапуск, процентный или монохромный значок в трее.
 - Восстановление изображения после аварийного завершения.
+- Кнопка проверки обновлений и опциональное автоматическое обновление через GitHub Releases.
 
 ### Управление
 
