@@ -1,6 +1,6 @@
 param(
     [string]$RepositoryUrl = 'https://github.com/CloudW4lker250/DimLite.git',
-    [string]$Tag = 'v1.6.0'
+    [string]$Tag = 'v1.0.0'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +26,7 @@ git push --set-upstream origin main
 git push origin $Tag
 
 Write-Host "Published branch main and tag $Tag to $RepositoryUrl"
-Write-Host "Release ZIP: $((Resolve-Path '.\release\DimLite-1.6.0-win-x64.zip').Path)"
-Write-Host "Checksum:    $((Resolve-Path '.\release\DimLite-1.6.0-win-x64.sha256').Path)"
+Write-Host "Release ZIP: $((Resolve-Path '.\release\DimLite-1.0.0-win-x64.zip').Path)"
+Write-Host "Checksum:    $((Resolve-Path '.\release\DimLite-1.0.0-win-x64.sha256').Path)"
+
 

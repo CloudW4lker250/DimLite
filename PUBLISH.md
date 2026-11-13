@@ -16,12 +16,13 @@ From this directory, run:
 .\scripts\publish.ps1
 ```
 
-The script checks that the working tree is clean, creates the `v1.6.0` tag, pushes `main` and the tag, and prints the release asset paths. It never force-pushes.
+The script checks that the working tree is clean, creates the `v1.0.0` tag, pushes `main` and the tag, and prints the release asset paths. It never force-pushes.
 
-Then create a GitHub Release from tag `v1.6.0` and upload:
+Then create a GitHub Release from tag `v1.0.0` and upload:
 
-- `release\DimLite-1.6.0-win-x64.zip`
-- `release\DimLite-1.6.0-win-x64.sha256`
+- `release\DimLite-1.0.0-win-x64.zip`
+- `release\DimLite-1.0.0-win-x64.sha256`
 
-Use [RELEASE_NOTES-v1.6.0.md](RELEASE_NOTES-v1.6.0.md) as the release description.
+Use [RELEASE_NOTES-v1.0.0.md](RELEASE_NOTES-v1.0.0.md) as the release description.
+
 

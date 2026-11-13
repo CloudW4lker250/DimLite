@@ -61,3 +61,4 @@ The app is event-driven. Idle operation does not poll the mouse or foreground ap
 
 DimLite is released under the [MIT License](LICENSE).
 
+

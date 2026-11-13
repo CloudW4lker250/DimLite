@@ -1,4 +1,4 @@
-// DimLite 1.6 - native, event-driven desktop dimming with no network access.
+// DimLite 1.0 - native, event-driven desktop dimming with no network access.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -20,7 +20,7 @@
 constexpr wchar_t MainClass[] = L"DimLite.Controller.1";
 constexpr wchar_t FlyoutClass[] = L"DimLite.Flyout.1";
 constexpr wchar_t MenuClass[] = L"DimLite.Menu.1";
-constexpr wchar_t VersionText[] = L"DimLite 1.6.0";
+constexpr wchar_t VersionText[] = L"DimLite 1.0.0";
 constexpr wchar_t RunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr UINT TrayMessage = WM_APP + 1, SetLevelMessage = WM_APP + 2;
 constexpr UINT ShowMessage = WM_APP + 3, HideMessage = WM_APP + 4, QuitMessage = WM_APP + 5;
@@ -1479,7 +1479,7 @@ bool WriteLiveStatus(const wchar_t* path) {
         "  \"brightness_locked\": %s,\n  \"sliders_enabled\": %s,\n  \"base_brightness\": %d,\n"
         "  \"profiles_enabled\": %s,\n  \"profile_count\": %zu,\n  \"active_profile\": %s,\n  \"foreground_hook_running\": %s,\n"
         "  \"hud_visible\": %s,\n  \"hud_alpha\": %u,\n  \"hud_rendered\": %s,\n  \"hud_has_focus\": %s,\n"
-        "  \"version\": \"1.6.0\",\n  \"settings_page\": %s,\n  \"tray_menu_items\": %zu,\n"
+        "  \"version\": \"1.0.0\",\n  \"settings_page\": %s,\n  \"tray_menu_items\": %zu,\n"
         "  \"hud_interactive\": %s,\n  \"hud_dragging\": %s,\n  \"hud_hide_timer\": %s,\n  \"hud_fading\": %s,\n  \"hud_level\": %d\n}\n",
         brightness, matches ? "true" : "false", IsWindowVisible(mainWindow) ? "true" : "false",
         IsWindowVisible(flyout) ? "true" : "false", static_cast<int>(SendMessageW(slider, TBM_GETPOS, 0, 0)),
@@ -1973,3 +1973,4 @@ int WINAPI wWinMain(HINSTANCE app, HINSTANCE, PWSTR, int) {
     Gdiplus::GdiplusShutdown(graphicsToken);
     return result == -1 ? 1 : 0;
 }
+

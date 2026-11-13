@@ -1,4 +1,4 @@
-# DimLite 1.6.0
+# DimLite 1.0.0
 
 Lightweight native Windows screen dimmer.
 
@@ -14,11 +14,12 @@ Lightweight native Windows screen dimmer.
 
 ## Assets
 
-- `DimLite-1.6.0-win-x64.zip` — portable x64 build.
-- `DimLite-1.6.0-win-x64.sha256` — SHA-256 checksum.
+- `DimLite-1.0.0-win-x64.zip` — portable x64 build.
+- `DimLite-1.0.0-win-x64.sha256` — SHA-256 checksum.
 
 ## Known limitations
 
 - Exclusive full-screen games and protected Windows desktops may not be affected by the Magnification API.
 - Hardware monitor brightness is not changed; DimLite applies software dimming to the desktop output.
+
 
