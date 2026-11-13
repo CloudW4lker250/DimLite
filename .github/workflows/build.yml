@@ -1,0 +1,41 @@
+name: Build DimLite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC developer command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build
+        shell: pwsh
+        run: .\source\build.ps1
+
+      - name: Check executable
+        shell: pwsh
+        run: |
+          $exe = Get-Item .\DimLite.exe
+          if ($exe.Length -lt 100KB) { throw "Executable is unexpectedly small." }
+          Write-Host "Built $($exe.Length) bytes"
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: DimLite-win-x64
+          path: DimLite.exe
+

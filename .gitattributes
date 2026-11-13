@@ -1,0 +1,12 @@
+* text=auto eol=crlf
+*.cpp text working-tree-encoding=UTF-8
+*.h text working-tree-encoding=UTF-8
+*.ps1 text working-tree-encoding=UTF-8
+*.md text working-tree-encoding=UTF-8
+*.txt text working-tree-encoding=UTF-8
+*.rc text working-tree-encoding=UTF-8
+*.manifest text working-tree-encoding=UTF-8
+*.ico binary
+*.exe binary
+*.zip binary
+

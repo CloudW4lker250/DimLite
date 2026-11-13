@@ -1,0 +1,41 @@
+# Visual Studio / MSVC build output
+*.obj
+*.res
+*.pdb
+*.ilk
+*.idb
+*.iobj
+*.ipdb
+*.tlog
+*.lastbuildstate
+Debug/
+Release/
+x64/
+build/
+out/
+
+# DimLite user data and local diagnostics
+settings.ini
+profiles.ini
+*.status.json
+*-results.json
+*-results.jsonl
+*.dmp
+
+# Local release staging (GitHub Releases receive the ZIP asset separately)
+dist/
+release/*.zip
+release/*.sha256
+release/*.exe
+release/stage/
+/*.exe
+
+# Editor and OS files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+Thumbs.db
+Desktop.ini
+
