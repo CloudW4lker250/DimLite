@@ -28,6 +28,8 @@ release/*.zip
 release/*.sha256
 release/*.exe
 release/stage/
+release/*-Setup.exe
+release/*-Setup.sha256
 /*.exe
 
 # Editor and OS files

@@ -10,6 +10,8 @@ The project is written in C++/Win32. It has no Electron, .NET runtime, network a
 
 Download the latest `DimLite-*-win-x64.zip` from the [Releases](../../releases) page, extract `DimLite.exe` and run it. It is portable; installation and administrator rights are not required.
 
+Releases also include `DimLite-*-Setup.exe`, which installs the app per-user and adds a normal Windows uninstaller. The ZIP remains available as the portable option.
+
 The application starts in the notification area. A shortcut can be placed in Start, and automatic startup is available in Settings.
 
 ## Features
@@ -89,5 +91,7 @@ DimLite is released under the [MIT License](LICENSE).
 - `Escape` — закрыть активную панель.
 
 Сборка выполняется командой `.\source\build.ps1` на Windows 10/11 x64 с установленными MSVC C++ Build Tools и Windows SDK. Лицензия — [MIT](LICENSE).
+
+В релизах также доступен `DimLite-*-Setup.exe`: он устанавливает приложение в профиль пользователя и добавляет обычное удаление через Windows. ZIP остаётся portable-вариантом.
 
 

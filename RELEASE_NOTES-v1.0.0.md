@@ -16,6 +16,8 @@ Lightweight native Windows screen dimmer.
 
 - `DimLite-1.0.0-win-x64.zip` — portable x64 build.
 - `DimLite-1.0.0-win-x64.sha256` — SHA-256 checksum.
+- `DimLite-1.0.0-Setup.exe` — full Windows installer.
+- `DimLite-1.0.0-Setup.sha256` — installer SHA-256 checksum.
 
 ## Known limitations
 
@@ -33,6 +35,6 @@ Lightweight native Windows screen dimmer.
 - Плавные переходы, профили приложений, блокировка яркости и страница настроек.
 - Нативная реализация C++/Win32 без сети и телеметрии.
 
-Файлы: `DimLite-1.0.0-win-x64.zip` — portable-сборка для Windows x64; `DimLite-1.0.0-win-x64.sha256` — контрольная сумма SHA-256.
+Файлы: `DimLite-1.0.0-win-x64.zip` — portable-сборка для Windows x64; `DimLite-1.0.0-win-x64.sha256` — контрольная сумма SHA-256; `DimLite-1.0.0-Setup.exe` — полноценный установщик; `DimLite-1.0.0-Setup.sha256` — его контрольная сумма.
 
 
